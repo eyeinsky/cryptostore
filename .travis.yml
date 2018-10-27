@@ -24,14 +24,14 @@ matrix:
   - { env: BUILD=weeder, compiler: weeder, language: generic, addons: { apt: { packages: [ libgmp-dev ] } } }
 
 install:
-  - export PATH=$HOME/.local/bin::$HOME/.cabal/bin:$PATH
+  - export PATH=$HOME/.local/bin:$HOME/.cabal/bin:$PATH
   - mkdir -p ~/.local/bin
   - |
     case "$BUILD" in
       stack|weeder)
         if [ `uname` = "Darwin" ]
         then
-          travis_retry curl --insecure -L https://www.stackage.org/stack/osx-x86_64 | tar xz --strip-components=1 --include '*/stack' -C ~/.local/bin
+          travis_retry curl -L https://www.stackage.org/stack/osx-x86_64 | tar xz --strip-components=1 --include '*/stack' -C ~/.local/bin
         else
           travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
         fi
@@ -74,7 +74,7 @@ script:
       curl -sL https://raw.github.com/ndmitchell/hlint/master/misc/travis.sh | sh -s . --cpp-define=__GLASGOW_HASKELL__=800 --cpp-define=x86_64_HOST_ARCH=1 --cpp-define=mingw32_HOST_OS=1
       ;;
     weeder)
-      stack --no-terminal build --install-ghc
+      stack --no-terminal build --install-ghc --test --no-run-tests --bench --no-run-benchmarks
       curl -sL https://raw.github.com/ndmitchell/weeder/master/misc/travis.sh | sh -s .
       ;;
   esac
