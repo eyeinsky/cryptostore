@@ -67,7 +67,6 @@ module Crypto.Store.PKCS12
     , toProtectionPassword
     , OptProtected(..)
     , recover
-    , recoverA
     ) where
 
 import Control.Applicative
@@ -78,7 +77,6 @@ import qualified Data.ByteArray as B
 import qualified Data.ByteString as BS
 import           Data.List (partition)
 import           Data.Maybe (isJust, fromMaybe, mapMaybe)
-import           Data.Semigroup
 import           Data.String (fromString)
 import qualified Data.X509 as X509
 import qualified Data.X509.Validation as X509

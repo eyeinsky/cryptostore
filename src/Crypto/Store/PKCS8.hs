@@ -24,12 +24,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Crypto.Store.PKCS8
-    ( readKeyFile
-    , readKeyFileFromMemory
-    , parseKey
-    , parseKeys
-    , writeKeyFile
-    , writeKeyFileToMemory
+    ( parseKey
     , keyToPEM
     , writeEncryptedKeyFile
     , writeEncryptedKeyFileToMemory
@@ -44,7 +39,6 @@ module Crypto.Store.PKCS8
     , toProtectionPassword
     , OptProtected(..)
     , recover
-    , recoverA
     -- * Reading and writing PEM files
     , readPEMs
     , writePEMs
@@ -96,38 +90,7 @@ recover :: ProtectionPassword -> OptProtected a -> Either StoreError a
 recover _   (Unprotected x) = Right x
 recover pwd (Protected f)   = f pwd
 
--- | Try to recover an 'OptProtected' content in an applicative context.  The
--- applicative password is used if necessary.
---
--- > import qualified Data.ByteString as B
--- > import           Crypto.Store.PKCS8
--- >
--- > [encryptedKey] <- readKeyFile "privkey.pem"
--- > let askForPassword = putStr "Please enter password: " >> B.getLine
--- > result <- recoverA (toProtectionPassword <$> askForPassword) encryptedKey
--- > case result of
--- >     Left err  -> putStrLn $ "Unable to recover key: " ++ show err
--- >     Right key -> print key
-recoverA :: Applicative f
-         => f ProtectionPassword
-         -> OptProtected a
-         -> f (Either StoreError a)
-recoverA _   (Unprotected x) = pure (Right x)
-recoverA get (Protected f)   = fmap f get
-
-
 -- Reading from PEM format
-
--- | Read private keys from a PEM file.
-readKeyFile :: FilePath -> IO [OptProtected X509.PrivKey]
-readKeyFile path = parseKeys <$> readPEMs path
-
--- | Read private keys from a bytearray in PEM format.
-readKeyFileFromMemory :: B.ByteString -> [OptProtected X509.PrivKey]
-readKeyFileFromMemory bs = parseKeys $ either (const []) id $ pemParseBS bs
-
-parseKeys :: [PEM] -> [OptProtected X509.PrivKey]
-parseKeys pems = mapMaybe (either (const Nothing) Just) $ map parseKey pems
 
 -- | Read a private key from a 'PEM' element and add it to the accumulator list.
 parseKey :: PEM -> Either String (OptProtected X509.PrivKey)
@@ -170,14 +133,6 @@ parseKey pem = runParseASN1 (getParser $ pemName pem) =<< either (Left . show) R
 
 
 -- Writing to PEM format
-
--- | Write unencrypted private keys to a PEM file.
-writeKeyFile :: PrivateKeyFormat -> FilePath -> [X509.PrivKey] -> IO ()
-writeKeyFile fmt path = writePEMs path . map (keyToPEM fmt)
-
--- | Write unencrypted private keys to a bytearray in PEM format.
-writeKeyFileToMemory :: PrivateKeyFormat -> [X509.PrivKey] -> B.ByteString
-writeKeyFileToMemory fmt = pemsWriteBS . map (keyToPEM fmt)
 
 -- | Write a PKCS #8 encrypted private key to a PEM file.
 --
