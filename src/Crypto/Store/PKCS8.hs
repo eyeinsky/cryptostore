@@ -24,7 +24,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Crypto.Store.PKCS8
-    ( parseKey
+    ( fromPem
     , keyToPEM
     , writeEncryptedKeyFile
     , writeEncryptedKeyFileToMemory
@@ -92,45 +92,56 @@ recover pwd (Protected f)   = f pwd
 
 -- Reading from PEM format
 
--- | Read a private key from a 'PEM' element and add it to the accumulator list.
-parseKey :: PEM -> Either String (OptProtected X509.PrivKey)
-parseKey pem = runParseASN1 (getParser $ pemName pem) =<< either (Left . show) Right (decodeASN1' BER (pemContent pem))
-  where
-    allTypes, rsa, dsa, ecdsa, x25519, x448, ed25519, ed448 :: ParseASN1 () X509.PrivKey
-    allTypes  = unFormat <$> parse
-    rsa       = X509.PrivKeyRSA . unFormat <$> parse
-    dsa       = X509.PrivKeyDSA . DSA.toPrivateKey . unFormat <$> parse
-    ecdsa     = X509.PrivKeyEC . unFormat <$> parse
-    x25519    = X509.PrivKeyX25519 <$> parseModern
-    x448      = X509.PrivKeyX448 <$> parseModern
-    ed25519   = X509.PrivKeyEd25519 <$> parseModern
-    ed448     = X509.PrivKeyEd448 <$> parseModern
+class FromASN1 a where
+  fromASN1_ :: [ASN1] -> Either String a
 
-    encrypted :: ParseASN1 () (ProtectionPassword -> Either StoreError X509.PrivKey)
-    encrypted = do
-      pkcs5 :: PKCS5 <- parse
-      pure $ \pw -> inner (decrypt pkcs5) pw
+-- instance FromASN1 (FormattedKey X509.PrivKey) where fromASN1_ = undefined
+-- instance FromASN1 X509.PrivKey where fromASN1_ = undefined
+instance FromASN1 RSA.PrivateKey where fromASN1_ = runParseASN1 (unFormat <$> parse)
+instance FromASN1 DSA.PrivateKey where fromASN1_ = runParseASN1 (DSA.toPrivateKey . unFormat <$> parse)
+instance FromASN1 X509.PrivKeyEC where fromASN1_ = runParseASN1 (unFormat <$> parse)
+instance FromASN1 X25519.SecretKey where fromASN1_ = runParseASN1 parseModern
+instance FromASN1 X448.SecretKey where fromASN1_ = runParseASN1 parseModern
+instance FromASN1 Ed25519.SecretKey where fromASN1_ = runParseASN1 parseModern
+instance FromASN1 Ed448.SecretKey where fromASN1_ = runParseASN1 parseModern
 
-    getParser :: String -> ParseASN1 () (OptProtected X509.PrivKey)
-    getParser "PRIVATE KEY"           = Unprotected <$> allTypes
-    getParser "RSA PRIVATE KEY"       = Unprotected <$> rsa
-    getParser "DSA PRIVATE KEY"       = Unprotected <$> dsa
-    getParser "EC PRIVATE KEY"        = Unprotected <$> ecdsa
-    getParser "X25519 PRIVATE KEY"    = Unprotected <$> x25519
-    getParser "X448 PRIVATE KEY"      = Unprotected <$> x448
-    getParser "ED25519 PRIVATE KEY"   = Unprotected <$> ed25519
-    getParser "ED448 PRIVATE KEY"     = Unprotected <$> ed448
-    getParser "ENCRYPTED PRIVATE KEY" = Protected   <$> encrypted
-    getParser _                       = empty
+-- | Parse private key from PEM
+fromPem :: PEM -> Either String (OptProtected X509.PrivKey)
+fromPem pem = do
+  asn1 :: [ASN1] <- either (Left . show) Right (decodeASN1' BER (pemContent pem))
+  let unprotected :: forall a . FromASN1 a => (a -> X509.PrivKey) -> Either String (OptProtected X509.PrivKey)
+      unprotected c = Unprotected . c <$> fromASN1_ @a asn1
+  case pemName pem of
+    -- "PRIVATE KEY"           -> unFormat <$> fromASN1_ asn1
+    "RSA PRIVATE KEY"       -> unprotected X509.PrivKeyRSA
+    "DSA PRIVATE KEY"       -> unprotected X509.PrivKeyDSA
+    "EC PRIVATE KEY"        -> unprotected X509.PrivKeyEC
+    "X25519 PRIVATE KEY"    -> unprotected X509.PrivKeyX25519
+    "X448 PRIVATE KEY"      -> unprotected X509.PrivKeyX448
+    "ED25519 PRIVATE KEY"   -> unprotected X509.PrivKeyEd25519
+    "ED448 PRIVATE KEY"     -> unprotected X509.PrivKeyEd448
+    -- "ENCRYPTED PRIVATE KEY" -> Protected   <$> encrypted
 
-    inner :: (t -> Either StoreError B.ByteString) -> t -> Either StoreError X509.PrivKey
-    inner decfn pwd = do
-        decrypted <- decfn pwd
-        asn1 <- mapLeft DecodingError $ decodeASN1' BER decrypted
-        case runParseASN1 allTypes asn1 of
-            Left err -> Left (ParseFailure $ "No key parsed after decryption: " <> err)
-            Right k  -> return k
+allTypes :: ParseASN1 () X509.PrivKey
+allTypes = unFormat <$> parse
 
+encrypted :: ParseASN1 () (ProtectionPassword -> Either StoreError X509.PrivKey)
+encrypted = do
+  pkcs5 :: PKCS5 <- parse
+  pure $ \pw -> inner (decrypt pkcs5) pw
+
+getParser :: String -> ParseASN1 () (OptProtected X509.PrivKey)
+getParser "PRIVATE KEY"           = Unprotected <$> allTypes
+getParser "ENCRYPTED PRIVATE KEY" = Protected   <$> encrypted
+getParser _                       = empty
+
+inner :: (t -> Either StoreError B.ByteString) -> t -> Either StoreError X509.PrivKey
+inner decfn pwd = do
+    decrypted <- decfn pwd
+    asn1 <- mapLeft DecodingError $ decodeASN1' BER decrypted
+    case runParseASN1 allTypes asn1 of
+        Left err -> Left (ParseFailure $ "No key parsed after decryption: " <> err)
+        Right k  -> return k
 
 -- Writing to PEM format
 
